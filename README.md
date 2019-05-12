@@ -1,5 +1,5 @@
 # TF_FlowersOxford
-Android app that uses MobileNetV2 to recognize 102 species of flowers. The image classifier was trained on pre-trained network and the input data is resized to 224x224 pixels  as required by the networks.
+Android app that uses MobileNetV2 to recognize 102 species of flowers. The image classifier was trained on pre-trained network and the input data is resized to 224x224 pixels  as required by the network.
 
 Dataset provided by University of Oxford: [**http://www.robots.ox.ac.uk/~vgg/data/flowers/102/**](http://www.robots.ox.ac.uk/~vgg/data/flowers/102/)
 
