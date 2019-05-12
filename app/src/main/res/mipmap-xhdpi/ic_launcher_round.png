@@ -1,0 +1,153 @@
+package com.arf.colorball.entities;
+
+import com.arf.colorball.util.Constants;
+import com.arf.colorball.util.FrameBufferHelper;
+import com.arf.colorball.util.PrefsHelper;
+import com.arf.colorball.util.Utilities;
+import com.badlogic.gdx.graphics.Color;
+import com.badlogic.gdx.graphics.Texture;
+import com.badlogic.gdx.maps.MapObject;
+import com.badlogic.gdx.maps.MapProperties;
+import com.badlogic.gdx.maps.objects.PolygonMapObject;
+import com.badlogic.gdx.maps.objects.PolylineMapObject;
+import com.badlogic.gdx.math.EarClippingTriangulator;
+import com.badlogic.gdx.math.GeometryUtils;
+import com.badlogic.gdx.math.Vector2;
+import com.badlogic.gdx.physics.box2d.BodyDef;
+import com.badlogic.gdx.physics.box2d.ChainShape;
+import com.badlogic.gdx.physics.box2d.FixtureDef;
+import com.badlogic.gdx.physics.box2d.PolygonShape;
+import com.badlogic.gdx.physics.box2d.World;
+import com.badlogic.gdx.scenes.scene2d.Stage;
+import com.badlogic.gdx.utils.Array;
+
+public class Solid extends Box2dBaseActor {
+
+    private static final float MARGIN = 32f;
+    private boolean isPolygon, isChain, isFromTile;
+    private Vector2 polygonStart;
+
+    @Override
+    public void create(World aWorld, float x, float y, float width, float height, Stage s, int type, int groupId, MapObject mapObject) {
+        switch (type) {
+            case 2:
+                this.isPolygon = true;
+                this.isFromTile = true;
+                createFromPolygon(aWorld, x, y, width, height, s, type, groupId, mapObject);
+                break;
+            case 3:
+                this.isPolygon = true;
+                this.isFromTile = true;
+                createFromChain(aWorld, x, y, width, height, s, type, groupId, mapObject);
+                break;
+            default:
+                this.isFromTile = false;
+                create(aWorld, x, y + height, width, height, s, type, groupId);
+        }
+
+        MapProperties props = mapObject.getProperties();
+        if (props.containsKey("rotation"))
+            rotateObject(Float.valueOf(props.get("rotation").toString()), 1, isFromTile, isPolygon);
+
+
+        setBodyPosition();
+    }
+
+    public void createFromPolygon(World aWorld, float x, float y, float width, float height, Stage s, int type, int groupId, MapObject mapObject) {
+        PolygonMapObject polygonMapObject = (PolygonMapObject) mapObject;
+
+        float[] vertices = polygonMapObject.getPolygon().getTransformedVertices();
+        float[] boundingRectangle = Utilities.getBoundingRectangle(vertices);
+        Vector2 origin = new Vector2(boundingRectangle[0], boundingRectangle[1]);
+        width = boundingRectangle[2];
+        height = boundingRectangle[3];
+
+        Vector2[] worldVertices = Utilities.getVectorVertices(origin, vertices);
+        polygonStart = new Vector2(vertices[0], vertices[1]).scl(Constants.WORLD_SCALE);
+
+        short[] triangles = new EarClippingTriangulator().computeTriangles(vertices).toArray();
+        Array<Array<Vector2[]>> triangleArrays = Utilities.getTriangleArrays(worldVertices, triangles, origin.x, origin.y, width, height);
+
+        String stageName = PrefsHelper.read(Constants.PrefsHelper.STAGE_NAME, Constants.PrefsHelper.STAGE_NAME_DEF);
+        Color[] colorArray = Constants.STAGE_COLOR_MAP.get(stageName);
+        Texture pixmap = FrameBufferHelper.instance.getSolidPolygon((int) width, (int) height, worldVertices, triangles, colorArray[4]);
+
+        createBaseActor(origin.x, origin.y + height, width, height, s, Constants.WORLD_SCALE);
+        loadTextureFromTexture(pixmap);
+
+        {
+            PolygonShape polygonShape = new PolygonShape();
+            float[] floatTemp = new float[6];
+
+            createBody(aWorld, BodyDef.BodyType.StaticBody).setUserData(this);
+            FixtureDef fd = getFixtureDef(polygonShape, 100f, 0.2f, 0.0f, false);
+            fd.filter.categoryBits = Constants.FilterCategory.COLLISION;
+
+            for (Vector2[] temp : triangleArrays.get(1)) {
+
+                for(int i=0; temp.length > i; i++){
+                    floatTemp[i*2] = temp[i].x;
+                    floatTemp[i*2+1] = temp[i].y;
+                }
+
+                if (Math.abs(GeometryUtils.polygonArea(floatTemp, 0, floatTemp.length)) > 0.1f) {
+                    polygonShape.set(temp);
+                    if (4 > polygonShape.getVertexCount()) {
+                        fd.shape = polygonShape;
+                        createFixture(fd, "main");
+                    }
+                }
+            }
+
+            polygonShape.dispose();
+        }
+    }
+
+    public void createFromChain(World aWorld, float xx, float yy, float width, float height, Stage s, int type, int groupId, MapObject mapObject) {
+        PolylineMapObject polylineMapObject = (PolylineMapObject) mapObject;
+
+
+        float[] vertices = polylineMapObject.getPolyline().getTransformedVertices();
+        float[] boundingRectangle = Utilities.getBoundingRectangle(vertices);
+        Vector2 origin = new Vector2(boundingRectangle[0] - MARGIN, boundingRectangle[1] - MARGIN);
+        width = boundingRectangle[2] + MARGIN * 2;
+        height = boundingRectangle[3] + MARGIN * 2;
+
+
+        Vector2[] worldVertices = Utilities.getVectorVertices(origin, vertices);
+        polygonStart = new Vector2(worldVertices[0].x, worldVertices[0].y).scl(Constants.WORLD_SCALE);
+        if (groupId == 3) {
+            worldVertices = Utilities.getCurvesVertices(worldVertices).toArray(Vector2.class);
+        } else if (groupId == 1) {
+            worldVertices = Utilities.getCurvesVerticesFromSpline(worldVertices, 10, true).toArray(Vector2.class);
+        }
+        Texture texture = FrameBufferHelper.instance.drawVertices(Color.RED, worldVertices, (int) width, (int) height, 5f);
+
+
+        Vector2 shapeCenter = new Vector2(width / 2, height / 2);
+        for (Vector2 vector2 : worldVertices) {
+            vector2.sub(shapeCenter).scl(Constants.WORLD_SCALE);
+        }
+
+        createBaseActor(origin.x, origin.y + height, width, height, s, Constants.WORLD_SCALE);
+        loadTextureFromTexture(texture);
+
+        {
+            ChainShape chainShape = new ChainShape();
+            chainShape.createChain(worldVertices);
+
+            createBody(aWorld, BodyDef.BodyType.StaticBody).setUserData(this);
+            FixtureDef fd = getFixtureDef(chainShape, 100f, 0.2f, 0.0f, false);
+            fd.filter.categoryBits = Constants.FilterCategory.COLLISION;
+            createFixture(fd, "main");
+
+            chainShape.dispose();
+        }
+    }
+
+
+    @Override
+    public void create(World aWorld, float x, float y, float width, float height, Stage s, int type, int groupId) {
+
+        String stageName = PrefsHelper.read(Constants.PrefsHelper.STAGE_NAME, Constants.PrefsHelper.STAGE_NAME_DEF);
+        Color
